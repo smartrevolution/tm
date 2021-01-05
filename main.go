@@ -9,45 +9,45 @@ import (
 type Kind int
 
 const (
-	Equipment Kind = 0
-	Property  Kind = 1
-	Link      Kind = 2
+	AddEquipment  Kind = 0
+	AddProperty   Kind = 1
+	LinkEquipment Kind = 2
 )
 
 func (k Kind) String() string {
 	names := [...]string{
-		"Equipment",
-		"Property",
-		"Link",
+		"AddEquipment",
+		"AddProperty",
+		"LinkEquipment",
 	}
-	if k < Equipment || k > Link {
+	if k < AddEquipment || k > LinkEquipment {
 		return "Unknown"
 	}
 	return names[k]
 }
 
-type Node struct {
+type Event struct {
 	ID       string
-	Name     string
 	Category Kind
 	ParentID string
 	Revision int
+	Payload  string
 }
 
-func NewNode(name string, category Kind, parentID string, revision int) *Node {
-	return &Node{
+func NewEvent(category Kind, parentID string, revision int, payload string) *Event {
+	return &Event{
 		ID:       idGen.NewID(category),
 		ParentID: parentID,
 		Category: category,
-		Name:     name,
+		Payload:  payload,
 	}
 }
 
 type Store struct {
-	DB []*Node
+	DB []*Event
 }
 
-func (s *Store) Save(n *Node) {
+func (s *Store) Save(n *Event) {
 	s.DB = append(s.DB, n)
 }
 
@@ -72,8 +72,8 @@ func addEquipment() *ishell.Cmd {
 		Func: func(ctx *ishell.Context) {
 			numArgs := len(ctx.Args)
 
-			// get mandatory param: name
-			name, err := GetArg(ctx, 0)
+			// get mandatory param: payload
+			payload, err := GetArg(ctx, 0)
 			if err != nil {
 				shell.Println(err)
 				return
@@ -92,8 +92,8 @@ func addEquipment() *ishell.Cmd {
 			}
 
 		Execute:
-			node := NewNode(name, Equipment, parentID, revision)
-			store.Save(node)
+			event := NewEvent(AddEquipment, parentID, revision, fmt.Sprintf("{name: %s}", payload))
+			store.Save(event)
 		},
 	}
 }
@@ -105,7 +105,15 @@ func addProperty() *ishell.Cmd {
 		Func: func(ctx *ishell.Context) {
 			numArgs := len(ctx.Args)
 
-			name, err := GetArg(ctx, 0)
+			// get mandatory param: payload-key
+			key, err := GetArg(ctx, 0)
+			if err != nil {
+				shell.Println(err)
+				return
+			}
+
+			// get mandatory param: payload-value
+			value, err := GetArg(ctx, 1)
 			if err != nil {
 				shell.Println(err)
 				return
@@ -113,8 +121,8 @@ func addProperty() *ishell.Cmd {
 
 			var parentID = "Nil"
 			// get optional param: parentID
-			if numArgs >= 2 {
-				parent, err := GetArg(ctx, 1)
+			if numArgs >= 3 {
+				parent, err := GetArg(ctx, 2)
 				if err != nil {
 					goto Execute
 				}
@@ -122,19 +130,19 @@ func addProperty() *ishell.Cmd {
 			}
 
 		Execute:
-			node := NewNode(name, Property, parentID, 0)
-			store.Save(node)
+			event := NewEvent(AddProperty, parentID, 0, fmt.Sprintf("{%s: %s}", key, value))
+			store.Save(event)
 		},
 	}
 }
 
-func listNodes() *ishell.Cmd {
+func listEvents() *ishell.Cmd {
 	return &ishell.Cmd{
-		Name: "nodes",
-		Help: "list nodes",
+		Name: "events",
+		Help: "list events",
 		Func: func(ctx *ishell.Context) {
-			for _, node := range store.DB {
-				shell.Printf("%s %s %s %s\n", node.ID, node.ParentID, node.Category, node.Name)
+			for _, event := range store.DB {
+				shell.Printf("%s %s %s %s\n", event.Category, event.ID, event.ParentID, event.Payload)
 			}
 		},
 	}
@@ -149,9 +157,9 @@ func (g *IdGen) NewID(category Kind) string {
 	g.nextID += 1
 
 	switch category {
-	case Equipment:
+	case AddEquipment:
 		return fmt.Sprintf("E%d", curID)
-	case Property:
+	case AddProperty:
 		return fmt.Sprintf("P%d", curID)
 	default:
 		return fmt.Sprintf("X%d", curID)
@@ -165,13 +173,11 @@ var (
 )
 
 func main() {
-	shell.SetPrompt("$ ")
-
 	shell.Println("Topology Manager Shell. READY.")
 
 	shell.AddCmd(addEquipment())
 	shell.AddCmd(addProperty())
-	shell.AddCmd(listNodes())
+	shell.AddCmd(listEvents())
 
 	shell.Run()
 }
