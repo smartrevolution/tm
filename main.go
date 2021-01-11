@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/abiosoft/ishell"
 )
@@ -26,21 +27,27 @@ func (k Kind) String() string {
 	return names[k]
 }
 
+type KeyValue map[string]string
+
 type Event struct {
-	ID       string
-	Category Kind
-	ParentID string
-	Revision int
-	Payload  string
+	ID        string
+	Category  Kind
+	ParentID  string
+	Revision  int
+	Payload   KeyValue
+	Timestamp int
 }
 
-func NewEvent(category Kind, parentID string, revision int, payload string) *Event {
-	return &Event{
-		ID:       idGen.NewID(category),
-		ParentID: parentID,
-		Category: category,
-		Payload:  payload,
+func NewEvent(category Kind, parentID string, revision int, payload KeyValue) *Event {
+	event := Event{
+		ID:        idGen.NewID(category),
+		ParentID:  parentID,
+		Category:  category,
+		Payload:   payload,
+		Timestamp: timestamp,
 	}
+	timestamp += 1
+	return &event
 }
 
 type Store struct {
@@ -49,6 +56,21 @@ type Store struct {
 
 func (s *Store) Save(n *Event) {
 	s.DB = append(s.DB, n)
+}
+
+func (s *Store) Render() string {
+	var rootEvents []*Event
+	for _, event := range s.DB {
+		if event.ParentID == "" {
+			rootEvents = append(rootEvents, event)
+		}
+	}
+
+	var objectTree strings.Builder
+	for _, root := range rootEvents {
+		objectTree.WriteString(fmt.Sprintf("%v", root))
+	}
+	return objectTree.String()
 }
 
 func NewStore() *Store {
@@ -72,8 +94,8 @@ func addEquipment() *ishell.Cmd {
 		Func: func(ctx *ishell.Context) {
 			numArgs := len(ctx.Args)
 
-			// get mandatory param: payload
-			payload, err := GetArg(ctx, 0)
+			// get mandatory param: name
+			name, err := GetArg(ctx, 0)
 			if err != nil {
 				shell.Println(err)
 				return
@@ -92,7 +114,8 @@ func addEquipment() *ishell.Cmd {
 			}
 
 		Execute:
-			event := NewEvent(AddEquipment, parentID, revision, fmt.Sprintf("{name: %s}", payload))
+			payload := NewKeyValue("Name", name)
+			event := NewEvent(AddEquipment, parentID, revision, payload)
 			store.Save(event)
 		},
 	}
@@ -130,7 +153,8 @@ func addProperty() *ishell.Cmd {
 			}
 
 		Execute:
-			event := NewEvent(AddProperty, parentID, 0, fmt.Sprintf("{%s: %s}", key, value))
+			payload := NewKeyValue(key, value)
+			event := NewEvent(AddProperty, parentID, 0, payload)
 			store.Save(event)
 		},
 	}
@@ -138,14 +162,39 @@ func addProperty() *ishell.Cmd {
 
 func listEvents() *ishell.Cmd {
 	return &ishell.Cmd{
-		Name: "events",
+		Name: "list",
 		Help: "list events",
 		Func: func(ctx *ishell.Context) {
 			for _, event := range store.DB {
-				shell.Printf("%s %s %s %s\n", event.Category, event.ID, event.ParentID, event.Payload)
+				shell.Printf("%d %s %s %s %s\n", event.Timestamp, event.Category, event.ID, event.ParentID, event.Payload)
 			}
 		},
 	}
+}
+
+func NewKeyValue(key string, value string) map[string]string {
+	return map[string]string{
+		key: value,
+	}
+
+}
+
+func loadEvents() int {
+	events := []Event{
+		Event{"E1", AddEquipment, "", 0, NewKeyValue("Name", "Laptop"), 1},
+		Event{"P2", AddProperty, "E1", 0, NewKeyValue("Manufacturer", "Apple"), 2},
+		Event{"E3", AddEquipment, "E1", 0, NewKeyValue("Name", "Keyboard"), 3},
+		Event{"P4", AddProperty, "E2", 0, NewKeyValue("Manufacturer", "Apple"), 4},
+		Event{"E5", AddEquipment, "", 0, NewKeyValue("Name", "Mouse"), 3},
+		Event{"P6", AddProperty, "E5", 0, NewKeyValue("Manufacturer", "Razer"), 4},
+	}
+
+	for _, event := range events {
+		event := event
+		store.Save(&event)
+	}
+
+	return len(events)
 }
 
 type IdGen struct {
@@ -167,13 +216,16 @@ func (g *IdGen) NewID(category Kind) string {
 }
 
 var (
-	shell = ishell.New()
-	store = NewStore()
-	idGen = IdGen{}
+	shell     = ishell.New()
+	store     = NewStore()
+	idGen     = IdGen{}
+	timestamp int
 )
 
 func main() {
+	numEvents := loadEvents()
 	shell.Println("Topology Manager Shell. READY.")
+	shell.Printf("%d events loaded. READY.\n", numEvents)
 
 	shell.AddCmd(addEquipment())
 	shell.AddCmd(addProperty())
