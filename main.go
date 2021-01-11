@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/abiosoft/ishell"
 )
@@ -56,21 +55,49 @@ type Store struct {
 
 func (s *Store) Save(n *Event) {
 	s.DB = append(s.DB, n)
+	objects = s.Build()
 }
 
-func (s *Store) Render() string {
+type Object struct {
+	ID         string
+	Payload    KeyValue
+	Properties KeyValue
+	Children   []*Object
+}
+
+func (s *Store) Build() []*Object {
 	var rootEvents []*Event
-	for _, event := range s.DB {
-		if event.ParentID == "" {
-			rootEvents = append(rootEvents, event)
+	for _, evt := range s.DB {
+		if evt.ParentID == "" {
+			rootEvents = append(rootEvents, evt)
 		}
 	}
 
-	var objectTree strings.Builder
-	for _, root := range rootEvents {
-		objectTree.WriteString(fmt.Sprintf("%v", root))
+	var objects []*Object
+	for _, evt := range rootEvents {
+		var obj = Object{
+			ID:         evt.ID,
+			Payload:    make(KeyValue),
+			Properties: make(KeyValue),
+		}
+
+		// add the Payload
+		for k, v := range evt.Payload {
+			obj.Payload[k] = v
+		}
+
+		// execute addprop events
+		for _, evt := range s.DB {
+			if evt.Category == AddProperty && evt.ParentID == obj.ID {
+				for k, v := range evt.Payload {
+					obj.Properties[k] = v
+				}
+			}
+		}
+
+		objects = append(objects, &obj)
 	}
-	return objectTree.String()
+	return objects
 }
 
 func NewStore() *Store {
@@ -160,13 +187,16 @@ func addProperty() *ishell.Cmd {
 	}
 }
 
-func listEvents() *ishell.Cmd {
+func list() *ishell.Cmd {
 	return &ishell.Cmd{
 		Name: "list",
-		Help: "list events",
+		Help: "list events and resulting objects",
 		Func: func(ctx *ishell.Context) {
-			for _, event := range store.DB {
-				shell.Printf("%d %s %s %s %s\n", event.Timestamp, event.Category, event.ID, event.ParentID, event.Payload)
+			for _, evt := range store.DB {
+				shell.Printf("%d %s %s %s %s\n", evt.Timestamp, evt.Category, evt.ID, evt.ParentID, evt.Payload)
+			}
+			for _, obj := range objects {
+				shell.Printf("%+v \n", obj)
 			}
 		},
 	}
@@ -218,6 +248,7 @@ func (g *IdGen) NewID(category Kind) string {
 var (
 	shell     = ishell.New()
 	store     = NewStore()
+	objects   []*Object
 	idGen     = IdGen{}
 	timestamp int
 )
@@ -229,7 +260,7 @@ func main() {
 
 	shell.AddCmd(addEquipment())
 	shell.AddCmd(addProperty())
-	shell.AddCmd(listEvents())
+	shell.AddCmd(list())
 
 	shell.Run()
 }
